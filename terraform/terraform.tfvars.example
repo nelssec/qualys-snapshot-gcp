@@ -1,0 +1,72 @@
+# GCP Snapshot-Based Scanning - Configuration Example
+# Copy this file to terraform.tfvars and update with your values
+
+# GCP Projects
+service_project_id = "my-service-project-id"
+target_project_ids = [
+  "target-project-1",
+  "target-project-2",
+  "target-project-3"
+]
+
+# Deployment Configuration
+region  = "us-central1"
+regions = ["us-central1", "us-east1", "europe-west1"]
+environment = "prod"
+
+# Qualys Configuration
+qualys_api_url            = "https://qualysapi.qualys.com"
+qualys_username           = "your-qualys-username"
+qualys_password           = "your-qualys-password"
+qualys_subscription_token = "segment1.segment2.your-api-key"
+
+# Snapshot Configuration
+snapshot_retention_hours        = 48    # How long to keep snapshots (24-168 hours)
+snapshot_refresh_interval_hours = 24    # How often to rescan instances (24-168 hours)
+batch_trigger_duration_minutes  = 10    # Batch event processing window (5-720 minutes)
+polling_interval_minutes        = 60    # Discovery polling frequency (15-1440 minutes)
+
+# Scanner Configuration
+scanner_instances_per_region = 5              # Number of scanner instances per region (1-50)
+scanner_machine_type         = "n2-standard-4"  # GCE machine type
+scanner_disk_size_gb         = 100            # Boot disk size in GB
+use_preemptible_scanners     = true           # Use preemptible VMs for cost savings
+scan_timeout_seconds         = 3600           # Maximum scan duration (60-3600 seconds)
+
+# QScanner Container Image
+# Leave empty to use default: gcr.io/qualys-public/qscanner:latest
+qscanner_image = ""
+
+# Instance Filtering
+# Only scan instances with these labels (all must match)
+include_labels = {
+  environment = "production"
+  scan        = "enabled"
+}
+
+# Skip instances with these labels (any match excludes)
+exclude_labels = {
+  scan = "disabled"
+  backup-only = "true"
+}
+
+# Discovery Settings
+enable_event_based_discovery = true  # Enable Eventarc-based discovery
+enable_poll_based_discovery  = true  # Enable scheduled polling discovery
+
+# Resource Labels
+labels = {
+  app         = "qualys-snapshot-scanner"
+  managed_by  = "terraform"
+  team        = "security"
+  environment = "production"
+}
+
+# Terraform Backend Configuration
+# Uncomment and configure for remote state storage
+# terraform {
+#   backend "gcs" {
+#     bucket  = "my-terraform-state-bucket"
+#     prefix  = "qualys-snapshot-scanner"
+#   }
+# }

@@ -1,0 +1,238 @@
+# Cloud Workflow: Cleanup
+# Cleanup old snapshots and temporary resources
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - retentionHours: ${retention_hours}
+          - currentTime: ${sys.now()}
+          - cutoffTime: ${currentTime - (retentionHours * 3600)}
+          - deletedSnapshots: []
+
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"Starting cleanup of snapshots older than " + string(retentionHours) + " hours"}
+          severity: INFO
+
+    - query_old_snapshots:
+        call: googleapis.firestore.v1.projects.databases.documents.runQuery
+        args:
+          parent: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents"}
+          body:
+            structuredQuery:
+              from:
+                - collectionId: "snapshots"
+              where:
+                compositeFilter:
+                  op: "AND"
+                  filters:
+                    - fieldFilter:
+                        field:
+                          fieldPath: "createdAt"
+                        op: "LESS_THAN"
+                        value:
+                          timestampValue: ${cutoffTime}
+                    - fieldFilter:
+                        field:
+                          fieldPath: "status"
+                        op: "EQUAL"
+                        value:
+                          stringValue: "ready"
+        result: oldSnapshots
+
+    - process_snapshots:
+        for:
+          value: snapshotDoc
+          in: ${oldSnapshots}
+          steps:
+            - extract_snapshot_data:
+                assign:
+                  - snapshotData: ${snapshotDoc.document.fields}
+                  - snapshotName: ${snapshotData.snapshotName.stringValue}
+                  - projectId: ${snapshotData.projectId.stringValue}
+
+            - delete_snapshot:
+                try:
+                  steps:
+                    - log_deleting:
+                        call: sys.log
+                        args:
+                          text: ${"Deleting snapshot " + snapshotName}
+                          severity: INFO
+
+                    - delete_gcp_snapshot:
+                        call: googleapis.compute.v1.snapshots.delete
+                        args:
+                          project: ${projectId}
+                          snapshot: ${snapshotName}
+                        result: deleteOp
+
+                    - wait_deletion:
+                        call: await_operation
+                        args:
+                          operation: ${deleteOp}
+                          projectId: ${projectId}
+
+                    - update_firestore:
+                        call: googleapis.firestore.v1.projects.databases.documents.patch
+                        args:
+                          name: ${snapshotDoc.document.name}
+                          body:
+                            fields:
+                              status:
+                                stringValue: "deleted"
+                              deletedAt:
+                                timestampValue: ${sys.now()}
+
+                    - add_to_deleted_list:
+                        assign:
+                          - deletedSnapshots: ${list.concat(deletedSnapshots, [snapshotName])}
+
+                except:
+                  as: e
+                  steps:
+                    - log_error:
+                        call: sys.log
+                        args:
+                          text: ${"Error deleting snapshot " + snapshotName + ": " + e.message}
+                          severity: ERROR
+
+    - cleanup_stale_disks:
+        call: cleanup_temporary_disks
+        result: diskCleanupResult
+
+    - return_result:
+        return:
+          success: true
+          deletedSnapshots: ${deletedSnapshots}
+          deletedDisks: ${diskCleanupResult.deletedDisks}
+          totalCleaned: ${len(deletedSnapshots) + len(diskCleanupResult.deletedDisks)}
+
+# Subworkflow: Cleanup Temporary Disks
+cleanup_temporary_disks:
+  steps:
+    - init:
+        assign:
+          - deletedDisks: []
+          - projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+
+    - list_all_zones:
+        call: googleapis.compute.v1.zones.list
+        args:
+          project: ${projectId}
+        result: zones
+
+    - process_zones:
+        for:
+          value: zone
+          in: ${zones.items}
+          steps:
+            - list_disks_in_zone:
+                try:
+                  call: googleapis.compute.v1.disks.list
+                  args:
+                    project: ${projectId}
+                    zone: ${zone.name}
+                    filter: "labels.app=qualys-snapshot-scanner labels.temporary=true"
+                  result: disks
+                except:
+                  as: e
+                  steps:
+                    - log_list_error:
+                        call: sys.log
+                        args:
+                          text: ${"Error listing disks in zone " + zone.name}
+                          severity: WARNING
+                    - continue_to_next_zone:
+                        next: continue
+
+            - check_disks:
+                switch:
+                  - condition: ${"items" in disks}
+                    next: process_disks_in_zone
+                next: continue
+
+            - process_disks_in_zone:
+                for:
+                  value: disk
+                  in: ${disks.items}
+                  steps:
+                    - check_disk_age:
+                        switch:
+                          - condition: ${disk.creationTimestamp < (sys.now() - 3600)}
+                            next: check_disk_users
+                        next: skip_disk
+
+                    - check_disk_users:
+                        switch:
+                          - condition: ${"users" not in disk}
+                            next: delete_disk
+                        next: skip_disk
+
+                    - delete_disk:
+                        try:
+                          steps:
+                            - log_disk_delete:
+                                call: sys.log
+                                args:
+                                  text: ${"Deleting stale disk " + disk.name + " in zone " + zone.name}
+                                  severity: INFO
+
+                            - delete_disk_resource:
+                                call: googleapis.compute.v1.disks.delete
+                                args:
+                                  project: ${projectId}
+                                  zone: ${zone.name}
+                                  disk: ${disk.name}
+
+                            - add_to_deleted:
+                                assign:
+                                  - deletedDisks: ${list.concat(deletedDisks, [disk.name])}
+
+                        except:
+                          as: e
+                          steps:
+                            - log_disk_error:
+                                call: sys.log
+                                args:
+                                  text: ${"Error deleting disk " + disk.name + ": " + e.message}
+                                  severity: ERROR
+
+                    - skip_disk:
+                        next: continue
+
+    - return_cleanup_result:
+        return:
+          deletedDisks: ${deletedDisks}
+
+# Subworkflow: Await Operation
+await_operation:
+  params: [operation, projectId]
+  steps:
+    - wait_loop:
+        for:
+          value: i
+          range: [1, 30]
+          steps:
+            - sleep:
+                call: sys.sleep
+                args:
+                  seconds: 5
+
+            - get_operation:
+                call: googleapis.compute.v1.globalOperations.get
+                args:
+                  project: ${projectId}
+                  operation: ${operation.name}
+                result: opResult
+
+            - check_done:
+                switch:
+                  - condition: ${opResult.status == "DONE"}
+                    return: ${opResult}
+
+    - timeout:
+        raise: "Operation timed out"

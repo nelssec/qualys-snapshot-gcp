@@ -1,0 +1,144 @@
+#cloud-config
+# Cloud-init configuration for Qualys scanner instances
+
+write_files:
+  - path: /etc/systemd/system/qscanner.service
+    permissions: '0644'
+    owner: root
+    content: |
+      [Unit]
+      Description=Qualys Scanner Service
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=simple
+      Restart=always
+      RestartSec=10
+      ExecStartPre=/usr/bin/docker pull ${qscanner_image}
+      ExecStart=/usr/bin/docker run --rm --privileged \
+        --name qscanner \
+        -v /dev:/dev \
+        -v /mnt/snapshots:/mnt/snapshots \
+        -v /var/lib/qscanner:/var/lib/qscanner \
+        -e QUALYS_SECRET_NAME=${qualys_secret_name} \
+        -e GCP_PROJECT_ID=${project_id} \
+        ${qscanner_image}
+      ExecStop=/usr/bin/docker stop qscanner
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/scan-snapshot.sh
+    permissions: '0755'
+    owner: root
+    content: |
+      #!/bin/bash
+      # Scan a snapshot with Qualys qscanner
+
+      set -euo pipefail
+
+      SNAPSHOT_NAME="$1"
+      DISK_NAME="$2"
+      OS_TYPE="${3:-linux}"  # linux or windows
+
+      echo "Starting scan for snapshot: $SNAPSHOT_NAME"
+
+      # Get Qualys credentials from Secret Manager
+      QUALYS_CREDS=$(gcloud secrets versions access latest --secret="${qualys_secret_name}" --project="${project_id}")
+      QUALYS_USERNAME=$(echo "$QUALYS_CREDS" | jq -r '.username')
+      QUALYS_PASSWORD=$(echo "$QUALYS_CREDS" | jq -r '.password')
+      QUALYS_API_URL=$(echo "$QUALYS_CREDS" | jq -r '.api_url')
+      QUALYS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.subscription_token')
+
+      # Create mount point
+      MOUNT_POINT="/mnt/snapshots/$DISK_NAME"
+      mkdir -p "$MOUNT_POINT"
+
+      # Wait for disk to be attached
+      DEVICE="/dev/disk/by-id/google-$DISK_NAME"
+      timeout 120 bash -c "until [ -e $DEVICE ]; do sleep 2; done"
+
+      # Mount the disk
+      if [ "$OS_TYPE" = "windows" ]; then
+        # Windows NTFS
+        mount -t ntfs-3g -o ro "$DEVICE" "$MOUNT_POINT"
+      else
+        # Linux ext4/xfs
+        mount -o ro "$DEVICE" "$MOUNT_POINT"
+      fi
+
+      # Run qscanner
+      if [ "$OS_TYPE" = "windows" ]; then
+        docker run --rm --privileged \
+          -v "$MOUNT_POINT:/mnt/scan:ro" \
+          -v "/var/lib/qscanner:/output" \
+          ${qscanner_image} \
+          winvmsnapshot \
+          --mount-path /mnt/scan \
+          --output-dir /output \
+          --snapshot-name "$SNAPSHOT_NAME"
+      else
+        docker run --rm --privileged \
+          -v "$MOUNT_POINT:/mnt/scan:ro" \
+          -v "/var/lib/qscanner:/output" \
+          ${qscanner_image} \
+          vmsnapshot \
+          --mount-path /mnt/scan \
+          --output-dir /output \
+          --snapshot-name "$SNAPSHOT_NAME"
+      fi
+
+      # Unmount
+      umount "$MOUNT_POINT"
+
+      # Upload ChangelistDB to QFlow
+      CHANGELIST_DB="/var/lib/qscanner/changelist.db"
+      if [ -f "$CHANGELIST_DB" ]; then
+        echo "Uploading ChangelistDB to QFlow..."
+        curl -X POST \
+          -H "Authorization: Bearer $QUALYS_TOKEN" \
+          -F "file=@$CHANGELIST_DB" \
+          -F "snapshot_name=$SNAPSHOT_NAME" \
+          "$QUALYS_API_URL/qflow/snapshot/v1/upload"
+
+        echo "Upload complete"
+        rm -f "$CHANGELIST_DB"
+      else
+        echo "ERROR: ChangelistDB not found at $CHANGELIST_DB"
+        exit 1
+      fi
+
+      echo "Scan complete for snapshot: $SNAPSHOT_NAME"
+
+  - path: /usr/local/bin/cleanup-disk.sh
+    permissions: '0755'
+    owner: root
+    content: |
+      #!/bin/bash
+      # Cleanup attached disk
+
+      set -euo pipefail
+
+      DISK_NAME="$1"
+      MOUNT_POINT="/mnt/snapshots/$DISK_NAME"
+
+      echo "Cleaning up disk: $DISK_NAME"
+
+      # Unmount if mounted
+      if mountpoint -q "$MOUNT_POINT"; then
+        umount "$MOUNT_POINT"
+      fi
+
+      # Remove mount point
+      rmdir "$MOUNT_POINT" 2>/dev/null || true
+
+      echo "Cleanup complete for disk: $DISK_NAME"
+
+runcmd:
+  - mkdir -p /var/lib/qscanner
+  - mkdir -p /mnt/snapshots
+  - systemctl daemon-reload
+  - systemctl enable qscanner.service
+  - systemctl start qscanner.service
+  - echo "Qualys scanner instance initialized"

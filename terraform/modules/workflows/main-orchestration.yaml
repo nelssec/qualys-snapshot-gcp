@@ -1,0 +1,204 @@
+# Cloud Workflow: Main Orchestration
+# Orchestrates the complete snapshot scanning workflow
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - instanceData: ${input}
+          - projectId: ${instanceData.projectId}
+          - zone: ${instanceData.zone}
+          - instanceName: ${instanceData.instanceName}
+          - instanceId: ${instanceData.instanceId}
+          - osType: ${default(map.get(instanceData, "osType"), "linux")}
+
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"Starting orchestration for instance " + instanceName + " (" + instanceId + ")"}
+          severity: INFO
+
+    - check_recent_scan:
+        call: check_last_scan_time
+        args:
+          instanceId: ${instanceId}
+        result: lastScanCheck
+
+    - skip_if_recent:
+        switch:
+          - condition: ${lastScanCheck.skipScan}
+            next: skip_scan
+
+    - create_snapshots:
+        try:
+          call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+          args:
+            workflow_id: "${create_snapshot_workflow}"
+            argument:
+              projectId: ${projectId}
+              zone: ${zone}
+              instanceName: ${instanceName}
+              instanceId: ${instanceId}
+          result: snapshotResult
+        except:
+          as: e
+          steps:
+            - log_snapshot_error:
+                call: sys.log
+                args:
+                  text: ${"Error creating snapshots: " + e.message}
+                  severity: ERROR
+            - fail_snapshot:
+                raise: ${e}
+
+    - check_snapshots_created:
+        switch:
+          - condition: ${len(snapshotResult.snapshots) == 0}
+            next: no_snapshots_created
+
+    - parallel_scan:
+        parallel:
+          shared: [scanResults]
+          for:
+            value: snapshot
+            in: ${snapshotResult.snapshots}
+            steps:
+              - scan_snapshot:
+                  try:
+                    call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+                    args:
+                      workflow_id: "${scan_snapshot_workflow}"
+                      argument:
+                        snapshotName: ${snapshot.snapshotName}
+                        projectId: ${projectId}
+                        zone: ${snapshot.zone}
+                        diskName: ${snapshot.diskName}
+                        osType: ${osType}
+                    result: scanResult
+                  except:
+                    as: e
+                    steps:
+                      - log_scan_error:
+                          call: sys.log
+                          args:
+                            text: ${"Error scanning snapshot " + snapshot.snapshotName + ": " + e.message}
+                            severity: ERROR
+
+              - add_scan_result:
+                  assign:
+                    - scanResults: ${list.concat(default(scanResults, []), [scanResult])}
+
+    - update_instance_scan_time:
+        call: googleapis.firestore.v1.projects.databases.documents.patch
+        args:
+          name: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents/instances/" + instanceId}
+          body:
+            fields:
+              lastScanned:
+                timestampValue: ${sys.now()}
+              scanStatus:
+                stringValue: "completed"
+              snapshotCount:
+                integerValue: ${len(snapshotResult.snapshots)}
+
+    - schedule_cleanup:
+        try:
+          call: googleapis.cloudscheduler.v1.projects.locations.jobs.run
+          args:
+            name: "qualys-cleanup-job"
+        except:
+          as: e
+          steps:
+            - log_cleanup_schedule_error:
+                call: sys.log
+                args:
+                  text: ${"Error scheduling cleanup: " + e.message}
+                  severity: WARNING
+
+    - return_success:
+        return:
+          success: true
+          instanceId: ${instanceId}
+          snapshotsCreated: ${len(snapshotResult.snapshots)}
+          snapshotsScanned: ${len(default(scanResults, []))}
+          message: "Scan orchestration completed successfully"
+
+    - skip_scan:
+        call: sys.log
+        args:
+          text: ${"Skipping scan for instance " + instanceName + " - recently scanned"}
+          severity: INFO
+        next: return_skipped
+
+    - return_skipped:
+        return:
+          success: true
+          instanceId: ${instanceId}
+          skipped: true
+          message: "Instance was recently scanned"
+
+    - no_snapshots_created:
+        call: sys.log
+        args:
+          text: ${"No snapshots were created for instance " + instanceName}
+          severity: WARNING
+        next: return_no_snapshots
+
+    - return_no_snapshots:
+        return:
+          success: false
+          instanceId: ${instanceId}
+          message: "No snapshots were created"
+
+# Subworkflow: Check Last Scan Time
+check_last_scan_time:
+  params: [instanceId]
+  steps:
+    - get_instance_doc:
+        try:
+          call: googleapis.firestore.v1.projects.databases.documents.get
+          args:
+            name: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents/instances/" + instanceId}
+          result: instanceDoc
+        except:
+          as: e
+          steps:
+            - log_not_found:
+                call: sys.log
+                args:
+                  text: ${"Instance document not found, proceeding with scan"}
+                  severity: INFO
+            - return_proceed:
+                return:
+                  skipScan: false
+                  reason: "no-previous-scan"
+
+    - check_last_scanned:
+        switch:
+          - condition: ${"lastScanned" in instanceDoc.fields}
+            next: calculate_time_diff
+        next: return_proceed
+
+    - calculate_time_diff:
+        assign:
+          - lastScanned: ${instanceDoc.fields.lastScanned.timestampValue}
+          - currentTime: ${sys.now()}
+          - timeDiff: ${currentTime - lastScanned}
+          - minScanInterval: ${24 * 3600}  # 24 hours in seconds
+
+    - check_if_skip:
+        switch:
+          - condition: ${timeDiff < minScanInterval}
+            next: return_skip
+
+    - return_proceed:
+        return:
+          skipScan: false
+          reason: "scan-needed"
+
+    - return_skip:
+        return:
+          skipScan: true
+          reason: "recently-scanned"
+          lastScanned: ${lastScanned}
