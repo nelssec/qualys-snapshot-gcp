@@ -36,10 +36,9 @@ get_qualys_credentials() {
         return 1
     fi
 
-    export QUALYS_USERNAME=$(echo "$QUALYS_CREDS" | jq -r '.username')
-    export QUALYS_PASSWORD=$(echo "$QUALYS_CREDS" | jq -r '.password')
+    export QUALYS_POD=$(echo "$QUALYS_CREDS" | jq -r '.pod')
     export QUALYS_API_URL=$(echo "$QUALYS_CREDS" | jq -r '.api_url')
-    export QUALYS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.subscription_token')
+    export QUALYS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.access_token')
 
     log "Credentials fetched successfully"
 }

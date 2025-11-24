@@ -46,10 +46,9 @@ write_files:
 
       # Get Qualys credentials from Secret Manager
       QUALYS_CREDS=$(gcloud secrets versions access latest --secret="${qualys_secret_name}" --project="${project_id}")
-      QUALYS_USERNAME=$(echo "$QUALYS_CREDS" | jq -r '.username')
-      QUALYS_PASSWORD=$(echo "$QUALYS_CREDS" | jq -r '.password')
+      QUALYS_POD=$(echo "$QUALYS_CREDS" | jq -r '.pod')
       QUALYS_API_URL=$(echo "$QUALYS_CREDS" | jq -r '.api_url')
-      QUALYS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.subscription_token')
+      QUALYS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.access_token')
 
       # Create mount point
       MOUNT_POINT="/mnt/snapshots/$DISK_NAME"

@@ -25,7 +25,7 @@ error() {
 # Check if qscanner binary exists
 if [ ! -f "$QSCANNER_BIN" ]; then
     error "QScanner binary not found at: $QSCANNER_BIN"
-    error "Please download qscanner from: https://github.com/nelssec/qualys-lambda/blob/main/scanner-lambda/qscanner.gz"
+    error "Please extract qscanner from bin/qscanner.gz and deploy to scanner instances"
     exit 1
 fi
 
@@ -35,10 +35,8 @@ QUALYS_CREDS=$(gcloud secrets versions access latest \
     --secret="${QUALYS_SECRET_NAME}" \
     --project="${GCP_PROJECT_ID}")
 
-POD=$(echo "$QUALYS_CREDS" | jq -r '.pod // "qg2"')
-ACCESS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.subscription_token')
-QUALYS_USERNAME=$(echo "$QUALYS_CREDS" | jq -r '.username // empty')
-QUALYS_PASSWORD=$(echo "$QUALYS_CREDS" | jq -r '.password // empty')
+POD=$(echo "$QUALYS_CREDS" | jq -r '.pod')
+ACCESS_TOKEN=$(echo "$QUALYS_CREDS" | jq -r '.access_token')
 
 # Create output directories
 mkdir -p "$OUTPUT_DIR" "$CACHE_DIR"
@@ -63,12 +61,6 @@ QSCANNER_CMD=(
 # For VM snapshots: vulnerabilities, packages, and secrets
 SCAN_TYPES="vuln,pkg,secret"
 QSCANNER_CMD+=("--scan-types" "$SCAN_TYPES")
-
-# Add registry credentials if available (for scanning images within the VM)
-if [ -n "$QUALYS_USERNAME" ] && [ -n "$QUALYS_PASSWORD" ]; then
-    export REGISTRY_USERNAME="$QUALYS_USERNAME"
-    export REGISTRY_PASSWORD="$QUALYS_PASSWORD"
-fi
 
 # Specify scan target
 # For VM snapshots, we need to determine the correct target type

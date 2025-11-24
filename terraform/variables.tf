@@ -23,28 +23,25 @@ variable "regions" {
   default     = ["us-central1"]
 }
 
+variable "qualys_pod" {
+  description = "Qualys platform POD (e.g., US1, US2, US3, EU1, EU2)"
+  type        = string
+  validation {
+    condition     = can(regex("^(US[1-4]|EU[1-2]|IN1|CA1|AU1|UK1)$", var.qualys_pod))
+    error_message = "Qualys POD must be a valid platform identifier (US1-4, EU1-2, IN1, CA1, AU1, UK1)."
+  }
+}
+
+variable "qualys_access_token" {
+  description = "Qualys access token for qscanner authentication and QFlow integration"
+  type        = string
+  sensitive   = true
+}
+
 variable "qualys_api_url" {
-  description = "Qualys API endpoint URL"
+  description = "Qualys API endpoint URL (optional, derived from POD if not specified)"
   type        = string
-  default     = "https://qualysapi.qualys.com"
-}
-
-variable "qualys_username" {
-  description = "Qualys API username"
-  type        = string
-  sensitive   = true
-}
-
-variable "qualys_password" {
-  description = "Qualys API password"
-  type        = string
-  sensitive   = true
-}
-
-variable "qualys_subscription_token" {
-  description = "Qualys subscription token for QFlow integration"
-  type        = string
-  sensitive   = true
+  default     = ""
 }
 
 variable "snapshot_retention_hours" {

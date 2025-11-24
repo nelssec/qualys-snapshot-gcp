@@ -4,12 +4,15 @@
 
 QScanner is the Qualys binary that performs vulnerability scanning on mounted VM snapshots.
 
-## Download
+## Extract
+
+The qscanner binary is bundled in this repository at `bin/qscanner.gz`:
 
 ```bash
-wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz
+cd bin
 gunzip qscanner.gz
 chmod +x qscanner
+cd ..
 ```
 
 ## Installation
@@ -35,21 +38,7 @@ gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=YOUR_SERVICE_PROJECT \
              sudo chmod +x /opt/bin/qscanner"
 ```
 
-### Option 2: Automated Installation (Pre-Deployment)
-
-Add to `terraform/modules/scanner/cloud-init.yaml` before deploying:
-
-```yaml
-runcmd:
-  - wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz -O /tmp/qscanner.gz
-  - gunzip /tmp/qscanner.gz
-  - chmod +x /tmp/qscanner
-  - mkdir -p /opt/bin
-  - mv /tmp/qscanner /opt/bin/qscanner
-  - /opt/bin/qscanner --version
-```
-
-### Option 3: Custom Scanner Image
+### Option 2: Custom Scanner Image
 
 Create a scanner image with qscanner pre-installed:
 

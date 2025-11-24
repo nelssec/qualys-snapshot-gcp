@@ -31,6 +31,26 @@ provider "google-beta" {
   region  = var.region
 }
 
+# Local variables
+locals {
+  # Map Qualys POD to API URL
+  # Reference: https://www.qualys.com/platform-identification/
+  qualys_api_urls = {
+    US1 = "https://qualysapi.qualys.com"
+    US2 = "https://qualysapi.qg2.apps.qualys.com"
+    US3 = "https://qualysapi.qg3.apps.qualys.com"
+    US4 = "https://qualysapi.qg4.apps.qualys.com"
+    EU1 = "https://qualysapi.qg1.apps.qualys.eu"
+    EU2 = "https://qualysapi.qg2.apps.qualys.eu"
+    IN1 = "https://qualysapi.qg1.apps.qualys.in"
+    CA1 = "https://qualysapi.qg1.apps.qualys.ca"
+    AU1 = "https://qualysapi.qg1.apps.qualys.com.au"
+    UK1 = "https://qualysapi.qg1.apps.qualys.co.uk"
+  }
+
+  qualys_api_url = var.qualys_api_url != "" ? var.qualys_api_url : local.qualys_api_urls[var.qualys_pod]
+}
+
 # Enable required APIs
 resource "google_project_service" "required_apis" {
   for_each = toset([
@@ -97,10 +117,9 @@ resource "google_secret_manager_secret_version" "qualys_credentials" {
   secret = google_secret_manager_secret.qualys_credentials.id
 
   secret_data = jsonencode({
-    username           = var.qualys_username
-    password           = var.qualys_password
-    api_url            = var.qualys_api_url
-    subscription_token = var.qualys_subscription_token
+    pod          = var.qualys_pod
+    access_token = var.qualys_access_token
+    api_url      = local.qualys_api_url
   })
 }
 

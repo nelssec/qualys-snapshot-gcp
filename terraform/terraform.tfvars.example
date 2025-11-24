@@ -15,10 +15,11 @@ regions = ["us-central1", "us-east1", "europe-west1"]
 environment = "prod"
 
 # Qualys Configuration
-qualys_api_url            = "https://qualysapi.qualys.com"
-qualys_username           = "your-qualys-username"
-qualys_password           = "your-qualys-password"
-qualys_subscription_token = "segment1.segment2.your-api-key"
+qualys_pod          = "US2"  # Your Qualys platform POD (US1, US2, US3, EU1, EU2, IN1, CA1, AU1, UK1)
+qualys_access_token = "your-access-token-from-qualys-ui"  # Export from Qualys UI
+
+# Optional: Override API URL (auto-derived from POD if not specified)
+# qualys_api_url = "https://qualysapi.qg2.apps.qualys.com"
 
 # Snapshot Configuration
 snapshot_retention_hours        = 48    # How long to keep snapshots (24-168 hours)

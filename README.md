@@ -25,18 +25,18 @@ Automated security scanning that creates snapshots of VM disks, scans them offli
 ### Qualys Requirements
 
 1. **Qualys Subscription** - Active VMDR subscription
-2. **Credentials** - API username, password, and subscription token
-3. **QScanner Binary** - Available at https://github.com/nelssec/qualys-lambda/blob/main/scanner-lambda/qscanner.gz
+2. **Credentials** - Qualys POD and access token (from Qualys UI)
+3. **QScanner Binary** - Bundled in `bin/qscanner.gz`
 
 ## Deployment
 
-### 1. Download QScanner
+### 1. Extract QScanner
 
 ```bash
-wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz
+cd bin
 gunzip qscanner.gz
 chmod +x qscanner
-# Keep this file - you'll need it during deployment
+cd ..
 ```
 
 ### 2. Configure
@@ -56,10 +56,8 @@ vim terraform/terraform.tfvars
 service_project_id = "your-service-project-id"
 target_project_ids = ["project-1", "project-2", "project-3"]
 
-qualys_api_url            = "https://qualysapi.qg2.apps.qualys.com"
-qualys_username           = "your-qualys-username"
-qualys_password           = "your-qualys-password"
-qualys_subscription_token = "your-subscription-token"
+qualys_pod          = "US2"  # Your Qualys platform POD (US1, US2, US3, EU1, etc.)
+qualys_access_token = "your-access-token"  # From Qualys UI
 
 # Optional: customize scanning behavior
 regions = ["us-central1", "us-east1"]
@@ -104,17 +102,6 @@ gcloud compute ssh INSTANCE_NAME \
   --zone=ZONE \
   --project=YOUR_SERVICE_PROJECT \
   --command="sudo mkdir -p /opt/bin && sudo mv /tmp/qscanner /opt/bin/qscanner && sudo chmod +x /opt/bin/qscanner"
-```
-
-Or add to `terraform/modules/scanner/cloud-init.yaml` before deployment:
-
-```yaml
-runcmd:
-  - wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz -O /tmp/qscanner.gz
-  - gunzip /tmp/qscanner.gz
-  - chmod +x /tmp/qscanner
-  - mkdir -p /opt/bin
-  - mv /tmp/qscanner /opt/bin/qscanner
 ```
 
 ### 5. Verify Deployment
