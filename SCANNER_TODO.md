@@ -1,6 +1,6 @@
 # Scanner Implementation - TO BE COMPLETED
 
-## Status: ⚠️ INCOMPLETE - REQUIRES QUALYS INPUT
+## Status: INCOMPLETE - REQUIRES QUALYS INPUT
 
 This document outlines what needs to be provided by Qualys to complete the GCP snapshot scanning implementation.
 
@@ -14,7 +14,7 @@ The infrastructure and orchestration are complete, but the actual scanner invoca
 
 **Question:** What is the actual scanner component for GCP VM snapshot scanning?
 
-**Options:**
+**Possible options:**
 - [ ] A special build of qscanner for VM snapshots
 - [ ] A separate Qualys Cloud Agent binary
 - [ ] A custom container image from Qualys private registry
@@ -30,7 +30,7 @@ The infrastructure and orchestration are complete, but the actual scanner invoca
 
 **Question:** How do we invoke the scanner on a mounted snapshot filesystem?
 
-**Current Assumption (NEEDS VALIDATION):**
+**Current assumption (requires validation):**
 ```bash
 # Linux
 qscanner vmsnapshot \
@@ -58,7 +58,7 @@ qscanner winvmsnapshot \
 
 **Question:** How are scan results uploaded to QFlow?
 
-**Current Assumption (NEEDS VALIDATION):**
+**Current assumption (requires validation):**
 ```bash
 # Scanner generates: /output/changelist.db
 # Upload via:
@@ -81,7 +81,7 @@ curl -X POST \
 
 **Question:** How do we detect Linux vs Windows for choosing vmsnapshot vs winvmsnapshot?
 
-**Options:**
+**Possible options:**
 - [ ] Inspect mounted filesystem (/etc, /Windows, etc.)
 - [ ] Use GCP instance metadata
 - [ ] Try Linux first, fallback to Windows
@@ -91,7 +91,7 @@ curl -X POST \
 
 **Question:** What are the expected error codes and how should we handle them?
 
-**Need:**
+**Required information:**
 - Exit codes and their meanings
 - Retry logic recommendations
 - Timeout values

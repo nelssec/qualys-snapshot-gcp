@@ -1,13 +1,13 @@
-# QScanner VM Snapshot Target - CONFIRMED ✅
+# QScanner VM Snapshot Target - CONFIRMED
 
 **Date**: 2025-11-24
-**Status**: ✅ VERIFIED
+**Status**: VERIFIED
 
 ## Confirmation
 
-QScanner **does support** `vmsnapshot` as a target type for scanning mounted VM snapshots.
+QScanner supports `vmsnapshot` as a target type for scanning mounted VM snapshots.
 
-**Note**: This is a "hidden field" not documented in public QScanner documentation, but confirmed as working.
+**Note**: This capability is not documented in public QScanner documentation, but has been confirmed as functional.
 
 ## Correct Invocation
 
@@ -23,7 +23,7 @@ QScanner **does support** `vmsnapshot` as a target type for scanning mounted VM 
 
 ## Implementation Status
 
-✅ **100% Complete** - The GCP implementation uses the correct invocation:
+The GCP implementation uses the correct invocation pattern.
 
 **File**: `scanner/scripts/run-qscanner.sh`
 
@@ -39,32 +39,32 @@ QScanner **does support** `vmsnapshot` as a target type for scanning mounted VM 
 
 | Scan Type | Description | Recommended |
 |-----------|-------------|-------------|
-| `vuln` | Vulnerability scanning | ✅ Yes |
-| `pkg` | Package/dependency scanning | ✅ Yes |
-| `secret` | Secret detection | ✅ Yes |
-| `swca` | Software composition analysis | ⚠️ Optional |
+| `vuln` | Vulnerability scanning | Yes |
+| `pkg` | Package/dependency scanning | Yes |
+| `secret` | Secret detection | Yes |
+| `swca` | Software composition analysis | Optional |
 
-**Recommended**: `--scan-types vuln,pkg,secret`
+**Recommended configuration**: `--scan-types vuln,pkg,secret`
 
 ## Complete Workflow
 
 ```
-1. Snapshot Creation ✅
+1. Snapshot Creation
    └─ Create GCP disk snapshot
 
-2. Disk Mounting ✅
+2. Disk Mounting
    └─ Attach snapshot as disk to scanner instance
    └─ Mount at /mnt/snapshot (read-only)
 
-3. QScanner Execution ✅
+3. QScanner Execution
    └─ /opt/bin/qscanner --pod ... vmsnapshot /mnt/snapshot
    └─ Generates: *-ScanResult.json
 
-4. Result Processing ✅
+4. Result Processing
    └─ Parse JSON for vulnerability counts
    └─ Upload to QFlow (optional)
 
-5. Cleanup ✅
+5. Cleanup
    └─ Unmount, detach, delete temporary resources
 ```
 
@@ -145,12 +145,12 @@ gcloud workflows execute qualys-scan-snapshot \
 
 ## Deployment Checklist
 
-- [x] Infrastructure deployed via Terraform
-- [x] QScanner binary installed at `/opt/bin/qscanner`
-- [x] Credentials configured in Secret Manager
-- [x] Scanner scripts use correct `vmsnapshot` target
-- [x] Cloud Workflows orchestrate end-to-end
-- [x] Cleanup automation in place
+- Infrastructure deployed via Terraform
+- QScanner binary installed at `/opt/bin/qscanner`
+- Credentials configured in Secret Manager
+- Scanner scripts use correct `vmsnapshot` target
+- Cloud Workflows orchestrate end-to-end
+- Cleanup automation in place
 
 ## Known Working Configuration
 
@@ -200,6 +200,6 @@ Both should work for scanning mounted filesystems.
 
 ---
 
-**Status**: ✅ **PRODUCTION READY**
+**Status**: PRODUCTION READY
 
 The GCP snapshot scanning implementation is complete and uses the correct `vmsnapshot` target type.

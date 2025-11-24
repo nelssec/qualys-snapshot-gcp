@@ -1,98 +1,98 @@
 # GCP Snapshot Scanning - Implementation Status
 
 **Last Updated:** 2025-11-24
-**Status:** ✅ Infrastructure Complete | ⚠️ Scanner Integration Pending
+**Status:** Infrastructure Complete | Scanner Integration Pending
 
 ## Summary
 
-This repository provides a **complete, production-ready infrastructure** for GCP snapshot-based scanning with Qualys. However, the actual scanner invocation requires Qualys-specific components that need to be obtained from Qualys support.
+This repository provides complete, production-ready infrastructure for GCP snapshot-based scanning with Qualys. The actual scanner invocation requires Qualys-specific components that must be obtained from Qualys support.
 
-## What's Complete ✅
+## Completed Components
 
-### 1. Infrastructure (100%)
-- ✅ Multi-project architecture (service + target projects)
-- ✅ Terraform modules for all GCP resources
-- ✅ IAM roles with least privilege
-- ✅ VPC networking with Cloud NAT
-- ✅ Managed Instance Groups for scanners
-- ✅ Secret Manager for credentials
-- ✅ Firestore for state management
-- ✅ Pub/Sub for event routing
+### 1. Infrastructure
+- Multi-project architecture (service + target projects)
+- Terraform modules for all GCP resources
+- IAM roles with least privilege
+- VPC networking with Cloud NAT
+- Managed Instance Groups for scanners
+- Secret Manager for credentials
+- Firestore for state management
+- Pub/Sub for event routing
 
-### 2. Orchestration (100%)
-- ✅ Cloud Workflows for complete scan lifecycle
-- ✅ Discovery workflow (find instances to scan)
-- ✅ Snapshot creation workflow
-- ✅ Scan execution workflow
-- ✅ Cleanup workflow
-- ✅ Main orchestration tying everything together
+### 2. Orchestration
+- Cloud Workflows for complete scan lifecycle
+- Discovery workflow (find instances to scan)
+- Snapshot creation workflow
+- Scan execution workflow
+- Cleanup workflow
+- Main orchestration tying everything together
 
-### 3. Automation (100%)
-- ✅ Cloud Functions for instance discovery
-- ✅ Cloud Scheduler for periodic scanning
-- ✅ Automatic snapshot creation
-- ✅ Automatic cleanup of old resources
-- ✅ Label-based instance filtering
+### 3. Automation
+- Cloud Functions for instance discovery
+- Cloud Scheduler for periodic scanning
+- Automatic snapshot creation
+- Automatic cleanup of old resources
+- Label-based instance filtering
 
-### 4. Deployment (100%)
-- ✅ One-command deployment script (`deploy.sh`)
-- ✅ Configuration examples
-- ✅ API enablement automation
-- ✅ Prerequisites checking
+### 4. Deployment
+- One-command deployment script (`deploy.sh`)
+- Configuration examples
+- API enablement automation
+- Prerequisites checking
 
-### 5. Documentation (100%)
-- ✅ Architecture documentation
-- ✅ Comprehensive README
-- ✅ Configuration guides
-- ✅ Troubleshooting section
-- ✅ Cost optimization strategies
+### 5. Documentation
+- Architecture documentation
+- Comprehensive README
+- Configuration guides
+- Troubleshooting section
+- Cost optimization strategies
 
-## What's Pending ⚠️
+## Pending Components
 
 ### Scanner Integration with Qualys
 
-The scanner instances will successfully:
-1. ✅ Receive scan requests
-2. ✅ Create snapshots
-3. ✅ Mount snapshot disks
-4. ✅ Detect OS type
-5. ⚠️ **Invoke Qualys scanner** ← NEEDS QUALYS INPUT
-6. ⚠️ **Upload results to QFlow** ← NEEDS VALIDATION
+The scanner instances successfully:
+1. Receive scan requests
+2. Create snapshots
+3. Mount snapshot disks
+4. Detect OS type
+5. **Invoke Qualys scanner** - requires Qualys-specific binaries and configuration
+6. **Upload results to QFlow** - requires validation of API endpoints and authentication
 
-## How It Currently Works
+## Current Implementation Status
 
 ### Architecture Flow
 
 ```
-1. Discovery (✅ WORKING)
+1. Discovery (Operational)
    └─► Cloud Scheduler triggers every hour
        └─► Cloud Function lists instances across target projects
            └─► Filters by labels and last scan time
                └─► Triggers Cloud Workflow for each instance
 
-2. Snapshot Creation (✅ WORKING)
+2. Snapshot Creation (Operational)
    └─► Cloud Workflow creates disk snapshots
        └─► Shares snapshots with service project
            └─► Tracks status in Firestore
 
-3. Scan Preparation (✅ WORKING)
+3. Scan Preparation (Operational)
    └─► Cloud Workflow creates temporary disk from snapshot
        └─► Attaches disk to scanner instance
            └─► Scanner instance mounts filesystem
 
-4. Scan Execution (⚠️ NEEDS QUALYS SCANNER)
+4. Scan Execution (Requires Qualys Components)
    └─► Scanner instance runs /usr/local/bin/scan-snapshot.sh
        └─► Script attempts to:
            a) Download scanner scripts from QFlow API (if available)
            b) Execute Qualys scanner on mounted filesystem
            c) Generate results (ChangelistDB or similar)
 
-5. Results Upload (⚠️ NEEDS VALIDATION)
+5. Results Upload (Requires Validation)
    └─► Scanner uploads results to QFlow
        └─► Endpoint: {qualys_api}/qflow/snapshot/v1/upload
-           └─► May need adjustment based on actual API
+           └─► May require adjustment based on actual API
 
-6. Cleanup (✅ WORKING)
+6. Cleanup (Operational)
    └─► Detach and delete temporary disks
        └─► Delete old snapshots
            └─► Remove stale scanner instances
@@ -123,12 +123,12 @@ Based on AWS implementation analysis, the scanner scripts use a **bootstrap-and-
 
 ### What the Scanner Scripts Need to Do
 
-1. **Mount the Snapshot** ✅ Already implemented
+1. **Mount the Snapshot** (Implemented)
    ```bash
    mount -o ro /dev/disk/by-id/google-$DISK_NAME /mnt/scan
    ```
 
-2. **Run Qualys Scanner** ⚠️ Needs clarification
+2. **Run Qualys Scanner** (Requires clarification)
    ```bash
    # Option A: QScanner with VM snapshot mode?
    qscanner vmsnapshot --mount-path /mnt/scan --output /output
@@ -140,7 +140,7 @@ Based on AWS implementation analysis, the scanner scripts use a **bootstrap-and-
    bash /opt/qualys-scanner/scripts/scan-linux.sh /mnt/scan
    ```
 
-3. **Upload Results** ⚠️ Needs validation
+3. **Upload Results** (Requires validation)
    ```bash
    curl -X POST \
      -H "Authorization: Bearer $TOKEN" \
@@ -158,8 +158,8 @@ Based on AWS implementation analysis, the scanner scripts use a **bootstrap-and-
 
 2. **What are the GCP QFlow API endpoints?**
    ```
-   ✅ Known (from AWS): /qflow/aws-snapshot/v1/scripts/*
-   ❓ GCP Equivalent: /qflow/gcp-snapshot/v1/scripts/*?
+   Known (from AWS): /qflow/aws-snapshot/v1/scripts/*
+   GCP Equivalent: /qflow/gcp-snapshot/v1/scripts/*?
    ```
 
 3. **What scanner binary/container should we use?**
@@ -215,13 +215,13 @@ gcloud workflows executions list \
 gcloud logging read 'resource.type="cloud_workflows"' --limit=50
 ```
 
-### 3. What You'll See
-- ✅ Instances discovered
-- ✅ Snapshots created
-- ✅ Disks attached to scanners
-- ✅ Filesystems mounted
-- ⚠️ Scanner runs placeholder script (logs warning)
-- ✅ Resources cleaned up
+### 3. Expected Output
+- Instances discovered
+- Snapshots created
+- Disks attached to scanners
+- Filesystems mounted
+- Scanner runs placeholder script (logs warning)
+- Resources cleaned up
 
 ## Path Forward
 
@@ -306,4 +306,4 @@ With active scanning (100-500 instances):
 
 ---
 
-**Bottom Line:** The infrastructure is production-ready. Once Qualys provides the GCP scanner components, drop them in and you're operational.
+**Summary:** The infrastructure is production-ready. Once Qualys provides the GCP scanner components, integration can be completed.

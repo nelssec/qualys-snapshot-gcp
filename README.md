@@ -14,14 +14,14 @@ This solution provides automated, non-intrusive security scanning of GCP VM inst
 
 ### Key Features
 
-- ✅ **Agentless scanning** - No software installation on target VMs
-- ✅ **Zero workload impact** - Scans run on snapshot copies
-- ✅ **Multi-project support** - Service account model for bulk scanning
-- ✅ **Automated orchestration** - Cloud Workflows handle the complete lifecycle
-- ✅ **Event and poll-based discovery** - Captures new instances automatically
-- ✅ **Cost-optimized** - Uses preemptible VMs and automatic cleanup
-- ✅ **Security isolation** - Dedicated VPC for scanner infrastructure
-- ✅ **Comprehensive scanning** - Vulnerabilities, secrets, and software composition analysis
+- **Agentless scanning** - No software installation on target VMs
+- **Zero workload impact** - Scans run on snapshot copies
+- **Multi-project support** - Service account model for bulk scanning
+- **Automated orchestration** - Cloud Workflows handle the complete lifecycle
+- **Event and poll-based discovery** - Captures new instances automatically
+- **Cost-optimized** - Uses preemptible VMs and automatic cleanup
+- **Security isolation** - Dedicated VPC for scanner infrastructure
+- **Comprehensive scanning** - Vulnerabilities, secrets, and software composition analysis
 
 ## Architecture
 
@@ -142,12 +142,12 @@ gcloud auth application-default login
 ```
 
 The deployment script will:
-- ✅ Check prerequisites
-- ✅ Enable required GCP APIs
-- ✅ Create Terraform state bucket
-- ✅ Deploy infrastructure with Terraform
-- ✅ Deploy Cloud Functions
-- ✅ Configure monitoring
+- Check prerequisites
+- Enable required GCP APIs
+- Create Terraform state bucket
+- Deploy infrastructure with Terraform
+- Deploy Cloud Functions
+- Configure monitoring
 
 ### 4. Verify Deployment
 
@@ -438,7 +438,7 @@ The solution follows the principle of least privilege:
 
 ## Contributing
 
-Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

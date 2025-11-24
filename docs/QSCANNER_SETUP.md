@@ -72,18 +72,18 @@ qscanner \
 
 ### Scan Types
 
-- **`vuln`**: Vulnerability scanning
-- **`pkg`**: Package/dependency scanning
-- **`secret`**: Secret detection
-- **`swca`**: Software composition analysis (may be alias for `pkg`)
+- **`vuln`** - Vulnerability scanning
+- **`pkg`** - Package/dependency scanning
+- **`secret`** - Secret detection
+- **`swca`** - Software composition analysis (may be alias for `pkg`)
 
 ### Target Types
 
-Need to determine from Qualys documentation which is correct for VM snapshots:
+Qualys documentation should confirm which target type is correct for VM snapshots:
 
-- **`vmsnapshot [path]`**: VM snapshot scanning (likely)
-- **`directory [path]`**: Directory scanning (fallback)
-- **`filesystem [path]`**: Filesystem scanning (alternative)
+- **`vmsnapshot [path]`** - VM snapshot scanning (likely)
+- **`directory [path]`** - Directory scanning (fallback)
+- **`filesystem [path]`** - Filesystem scanning (alternative)
 
 ## Output Format
 
@@ -277,4 +277,4 @@ qscanner ... filesystem /mnt/scan    # Alternative
 
 ---
 
-**Status**: ✅ QScanner invocation pattern confirmed from Lambda implementation
+**Status**: QScanner invocation pattern confirmed from Lambda implementation
