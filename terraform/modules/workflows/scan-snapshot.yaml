@@ -1,0 +1,233 @@
+# Cloud Workflow: Scan Snapshot
+# Scans a snapshot using Qualys qscanner
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - snapshotName: ${input.snapshotName}
+          - projectId: ${input.projectId}
+          - zone: ${input.zone}
+          - diskName: ${input.diskName}
+          - osType: ${default(map.get(input, "osType"), "linux")}
+          - scanTimeout: ${scan_timeout_seconds}
+          - diskResourceName: ${"qualys-scan-disk-" + string(int(sys.now()))}
+
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"Starting scan for snapshot " + snapshotName}
+          severity: INFO
+
+    - create_disk_from_snapshot:
+        call: googleapis.compute.v1.disks.insert
+        args:
+          project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+          body:
+            name: ${diskResourceName}
+            description: "Temporary disk for Qualys scanning"
+            sourceSnapshot: ${"projects/" + projectId + "/global/snapshots/" + snapshotName}
+            labels:
+              app: "qualys-snapshot-scanner"
+              temporary: "true"
+              snapshot: ${snapshotName}
+        result: createDiskOp
+
+    - wait_disk_creation:
+        call: await_operation
+        args:
+          operation: ${createDiskOp}
+          projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+
+    - get_scanner_instance:
+        call: find_available_scanner
+        args:
+          zone: ${zone}
+        result: scannerInstance
+
+    - attach_disk_to_scanner:
+        call: googleapis.compute.v1.instances.attachDisk
+        args:
+          project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+          instance: ${scannerInstance.name}
+          body:
+            source: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/zones/" + zone + "/disks/" + diskResourceName}
+            mode: "READ_ONLY"
+            deviceName: ${diskResourceName}
+        result: attachOp
+
+    - wait_disk_attach:
+        call: await_operation
+        args:
+          operation: ${attachOp}
+          projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+
+    - trigger_scan:
+        try:
+          steps:
+            - run_scan_script:
+                call: googleapis.compute.v1.instances.runScript
+                args:
+                  project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+                  zone: ${zone}
+                  instance: ${scannerInstance.name}
+                  body:
+                    script: ${"/usr/local/bin/scan-snapshot.sh " + snapshotName + " " + diskResourceName + " " + osType}
+                    timeout: ${scanTimeout}
+                result: scanResult
+
+            - log_scan_complete:
+                call: sys.log
+                args:
+                  text: ${"Scan completed for snapshot " + snapshotName}
+                  severity: INFO
+
+            - update_scan_status:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents/snapshots/" + snapshotName}
+                  body:
+                    fields:
+                      scanStatus:
+                        stringValue: "completed"
+                      scannedAt:
+                        timestampValue: ${sys.now()}
+                      scannerInstance:
+                        stringValue: ${scannerInstance.name}
+
+        except:
+          as: e
+          steps:
+            - log_scan_error:
+                call: sys.log
+                args:
+                  text: ${"Error during scan: " + e.message}
+                  severity: ERROR
+
+            - update_scan_error:
+                call: googleapis.firestore.v1.projects.databases.documents.patch
+                args:
+                  name: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents/snapshots/" + snapshotName}
+                  body:
+                    fields:
+                      scanStatus:
+                        stringValue: "failed"
+                      scanError:
+                        stringValue: ${e.message}
+                      scannedAt:
+                        timestampValue: ${sys.now()}
+
+    - detach_disk:
+        try:
+          call: googleapis.compute.v1.instances.detachDisk
+          args:
+            project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+            zone: ${zone}
+            instance: ${scannerInstance.name}
+            deviceName: ${diskResourceName}
+          result: detachOp
+        except:
+          as: e
+          steps:
+            - log_detach_error:
+                call: sys.log
+                args:
+                  text: ${"Error detaching disk: " + e.message}
+                  severity: ERROR
+
+    - wait_disk_detach:
+        call: await_operation
+        args:
+          operation: ${detachOp}
+          projectId: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+
+    - delete_temporary_disk:
+        try:
+          call: googleapis.compute.v1.disks.delete
+          args:
+            project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+            zone: ${zone}
+            disk: ${diskResourceName}
+        except:
+          as: e
+          steps:
+            - log_delete_error:
+                call: sys.log
+                args:
+                  text: ${"Error deleting temporary disk: " + e.message}
+                  severity: ERROR
+
+    - return_result:
+        return:
+          success: true
+          snapshotName: ${snapshotName}
+          scanStatus: "completed"
+
+# Subworkflow: Find Available Scanner
+find_available_scanner:
+  params: [zone]
+  steps:
+    - list_instances:
+        call: googleapis.compute.v1.instances.list
+        args:
+          project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          zone: ${zone}
+          filter: "labels.app=qualys-snapshot-scanner status=RUNNING"
+        result: instances
+
+    - check_instances:
+        switch:
+          - condition: ${len(instances.items) > 0}
+            assign:
+              - selectedInstance: ${instances.items[0]}
+            next: return_instance
+        next: no_scanner_found
+
+    - no_scanner_found:
+        raise:
+          message: "No available scanner instance found in zone"
+          zone: ${zone}
+
+    - return_instance:
+        return: ${selectedInstance}
+
+# Subworkflow: Await Operation
+await_operation:
+  params: [operation, projectId, zone]
+  steps:
+    - init_wait:
+        assign:
+          - opName: ${operation.name}
+          - isDone: false
+
+    - wait_loop:
+        for:
+          value: i
+          range: [1, 60]
+          steps:
+            - sleep:
+                call: sys.sleep
+                args:
+                  seconds: 5
+
+            - get_operation:
+                call: googleapis.compute.v1.zoneOperations.get
+                args:
+                  project: ${projectId}
+                  zone: ${zone}
+                  operation: ${opName}
+                result: opResult
+
+            - check_done:
+                switch:
+                  - condition: ${opResult.status == "DONE"}
+                    return: ${opResult}
+
+    - timeout:
+        raise: "Operation timed out"

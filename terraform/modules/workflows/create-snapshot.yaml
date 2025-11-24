@@ -1,0 +1,201 @@
+# Cloud Workflow: Create Snapshot
+# Creates snapshots from VM instance disks
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - projectId: ${input.projectId}
+          - zone: ${input.zone}
+          - instanceName: ${input.instanceName}
+          - instanceId: ${input.instanceId}
+          - snapshotPrefix: ${"qualys-scan-" + instanceId + "-"}
+          - snapshotList: []
+
+    - log_start:
+        call: sys.log
+        args:
+          text: ${"Creating snapshot for instance " + instanceName + " in " + projectId}
+          severity: INFO
+
+    - get_instance:
+        call: googleapis.compute.v1.instances.get
+        args:
+          project: ${projectId}
+          zone: ${zone}
+          instance: ${instanceName}
+        result: instance
+
+    - check_instance_status:
+        switch:
+          - condition: ${instance.status != "RUNNING" and instance.status != "TERMINATED"}
+            next: skip_snapshot
+        next: process_disks
+
+    - process_disks:
+        for:
+          value: disk
+          in: ${instance.disks}
+          steps:
+            - check_disk_type:
+                switch:
+                  - condition: ${disk.boot == true}
+                    next: create_disk_snapshot
+                next: skip_disk
+
+            - create_disk_snapshot:
+                try:
+                  steps:
+                    - extract_disk_name:
+                        assign:
+                          - diskSource: ${disk.source}
+                          - diskParts: ${text.split(diskSource, "/")}
+                          - diskName: ${diskParts[len(diskParts)-1]}
+                          - diskZone: ${diskParts[len(diskParts)-3]}
+                          - snapshotName: ${snapshotPrefix + diskName + "-" + string(int(sys.now()))}
+
+                    - log_disk:
+                        call: sys.log
+                        args:
+                          text: ${"Creating snapshot " + snapshotName + " from disk " + diskName}
+                          severity: INFO
+
+                    - create_snapshot:
+                        call: googleapis.compute.v1.disks.createSnapshot
+                        args:
+                          project: ${projectId}
+                          zone: ${diskZone}
+                          disk: ${diskName}
+                          body:
+                            name: ${snapshotName}
+                            description: ${"Qualys security scan snapshot for " + instanceName}
+                            labels:
+                              app: "qualys-snapshot-scanner"
+                              instance: ${instanceId}
+                              created-by: "qualys-workflow"
+                            storageLocations:
+                              - ${text.split(diskZone, "-")[0] + "-" + text.split(diskZone, "-")[1]}
+                        result: snapshotOp
+
+                    - wait_snapshot:
+                        call: await_operation
+                        args:
+                          operation: ${snapshotOp}
+                          projectId: ${projectId}
+                        result: snapshotResult
+
+                    - add_to_list:
+                        assign:
+                          - snapshotList: ${list.concat(snapshotList, [{
+                              "snapshotName": snapshotName,
+                              "diskName": diskName,
+                              "zone": diskZone,
+                              "status": "ready"
+                            }])}
+
+                    - update_firestore:
+                        call: googleapis.firestore.v1.projects.databases.documents.createDocument
+                        args:
+                          parent: ${"projects/" + sys.get_env("GOOGLE_CLOUD_PROJECT_ID") + "/databases/(default)/documents"}
+                          collectionId: "snapshots"
+                          body:
+                            fields:
+                              snapshotName:
+                                stringValue: ${snapshotName}
+                              instanceId:
+                                stringValue: ${instanceId}
+                              instanceName:
+                                stringValue: ${instanceName}
+                              projectId:
+                                stringValue: ${projectId}
+                              zone:
+                                stringValue: ${zone}
+                              diskName:
+                                stringValue: ${diskName}
+                              createdAt:
+                                timestampValue: ${sys.now()}
+                              status:
+                                stringValue: "ready"
+                              scanStatus:
+                                stringValue: "pending"
+
+                except:
+                  as: e
+                  steps:
+                    - log_error:
+                        call: sys.log
+                        args:
+                          text: ${"Error creating snapshot: " + e.message}
+                          severity: ERROR
+
+            - skip_disk:
+                next: continue
+
+    - skip_snapshot:
+        call: sys.log
+        args:
+          text: ${"Skipping snapshot - instance not in valid state: " + instance.status}
+          severity: WARNING
+
+    - return_result:
+        return:
+          success: true
+          snapshots: ${snapshotList}
+          instanceId: ${instanceId}
+          instanceName: ${instanceName}
+          projectId: ${projectId}
+
+# Subworkflow: Await Operation
+await_operation:
+  params: [operation, projectId]
+  steps:
+    - init_wait:
+        assign:
+          - opName: ${operation.name}
+          - isDone: false
+          - sleepTime: 5
+
+    - check_operation:
+        try:
+          steps:
+            - wait_loop:
+                for:
+                  value: i
+                  range: [1, 60]
+                  steps:
+                    - sleep:
+                        call: sys.sleep
+                        args:
+                          seconds: ${sleepTime}
+
+                    - get_operation:
+                        call: googleapis.compute.v1.globalOperations.get
+                        args:
+                          project: ${projectId}
+                          operation: ${opName}
+                        result: opResult
+
+                    - check_done:
+                        switch:
+                          - condition: ${opResult.status == "DONE"}
+                            assign:
+                              - isDone: true
+                            next: return_op
+
+                    - continue_wait:
+                        next: continue
+
+            - return_op:
+                return: ${opResult}
+
+        except:
+          as: e
+          steps:
+            - log_error:
+                call: sys.log
+                args:
+                  text: ${"Error waiting for operation: " + e.message}
+                  severity: ERROR
+            - fail:
+                raise: ${e}
