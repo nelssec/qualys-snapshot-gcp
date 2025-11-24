@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the architecture for implementing Qualys snapshot-based vulnerability scanning for Google Cloud Platform (GCP), following the patterns established in AWS and Azure implementations.
+This document outlines the architecture for Qualys snapshot-based vulnerability scanning in Google Cloud Platform.
 
 ## Key Concepts
 
@@ -14,25 +14,22 @@ This document outlines the architecture for implementing Qualys snapshot-based v
 
 ## Architecture Components
 
-### Service Account Model
-Similar to AWS/Azure implementations, we use a separation-of-concerns model:
+### Multi-Project Model
 
 - **Service Project**: Contains orchestration infrastructure and scanning resources
 - **Target Projects**: GCP projects containing VM instances to be scanned
 
-### GCP Services Mapping
+### Core GCP Services
 
-| AWS Service | Azure Service | GCP Equivalent | Purpose |
-|-------------|---------------|----------------|---------|
-| Step Functions | Logic Apps | Cloud Workflows | Orchestration state machines |
-| Lambda | Azure Functions | Cloud Functions | Event-driven compute |
-| EventBridge | Event Hub | Pub/Sub + Eventarc | Event routing and triggers |
-| DynamoDB | CosmosDB | Firestore | Configuration and state storage |
-| SQS | Service Bus | Pub/Sub | Message queuing |
-| API Gateway | API Management | API Gateway / Cloud Run | REST API endpoints |
-| CloudFormation | Terraform | Terraform / Deployment Manager | Infrastructure as Code |
-| SSM | Automation | Cloud Scheduler + Functions | Scheduled tasks |
-| ECR | Container Registry | Artifact Registry | Container image storage |
+| Service | Purpose |
+|---------|---------|
+| Cloud Workflows | Orchestration state machines |
+| Cloud Functions | Event-driven compute for discovery |
+| Pub/Sub + Eventarc | Event routing and triggers |
+| Firestore | Configuration and state storage |
+| Cloud Scheduler | Scheduled discovery tasks |
+| Compute Engine | Scanner instance execution |
+| Secret Manager | Qualys credentials storage |
 
 ## Workflow Design
 
@@ -207,18 +204,8 @@ Cloud Workflow: Cleanup
 - Scanner instance failures
 - Quota limits approaching
 
-## Future Enhancements
-
-1. **Multi-region Support**: Parallel scanning across multiple GCP regions
-2. **GKE Integration**: Container-based scanner deployment
-3. **Cloud Run**: Serverless scanner execution
-4. **Artifact Analysis Integration**: Native GCP vulnerability scanning comparison
-5. **Security Command Center Integration**: Export findings to GCP SCC
-
 ## References
 
-- [AWS Zero-Touch Snapshot-based Scan Documentation](https://docs.qualys.com/en/conn/latest/scans/snapshot-based_scan.htm)
-- [Azure Zero-Touch Snapshot-based Scan Documentation](https://docs.qualys.com/en/conn/latest/scans/configure_zero-touch_snapshot-based_scan_for_azure.htm)
 - [Qualys QFlow Documentation](https://docs.qualys.com/en/qflow/latest/getting_started/overview.htm)
 - [GCP Compute Engine Snapshots](https://cloud.google.com/compute/docs/disks/create-snapshots)
 - [GCP Cloud Workflows](https://cloud.google.com/workflows/docs)

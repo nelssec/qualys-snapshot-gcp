@@ -1,280 +1,215 @@
-# QScanner Setup for GCP Snapshot Scanning
+# QScanner Setup
 
 ## Overview
 
-Based on the [nelssec/qualys-lambda](https://github.com/nelssec/qualys-lambda) implementation, we now know how to properly invoke qscanner for scanning.
+QScanner is the Qualys binary that performs vulnerability scanning on mounted VM snapshots.
 
-## QScanner Binary
-
-### Source
-
-The qscanner binary is available at:
-- **Repository**: https://github.com/nelssec/qualys-lambda
-- **File**: `scanner-lambda/qscanner.gz` (40MB compressed)
-- **Extracted**: `/opt/bin/qscanner`
-
-### Download and Install
+## Download
 
 ```bash
-# Download qscanner
 wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz
-
-# Extract
 gunzip qscanner.gz
-
-# Make executable
 chmod +x qscanner
-
-# Place in standard location
-sudo mkdir -p /opt/bin
-sudo mv qscanner /opt/bin/qscanner
-
-# Verify
-/opt/bin/qscanner --help
 ```
 
-## Command-Line Invocation
+## Installation
 
-### Pattern from Lambda Implementation
+### Option 1: Manual Installation (Post-Deployment)
+
+After deploying infrastructure, install on each scanner instance:
 
 ```bash
-qscanner \
-  --pod [POD] \
-  --access-token [TOKEN] \
-  --output-dir /tmp/qscanner-output \
-  --cache-dir /tmp/qscanner-cache \
-  --scan-types pkg,secret \
-  lambda [FUNCTION_ARN]
+# List scanner instances
+gcloud compute instances list \
+  --filter="labels.app=qualys-snapshot-scanner" \
+  --project=YOUR_SERVICE_PROJECT
+
+# Copy to each instance
+gcloud compute scp qscanner INSTANCE_NAME:/tmp/ \
+  --zone=ZONE --project=YOUR_SERVICE_PROJECT
+
+# Install
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=YOUR_SERVICE_PROJECT \
+  --command="sudo mkdir -p /opt/bin && \
+             sudo mv /tmp/qscanner /opt/bin/qscanner && \
+             sudo chmod +x /opt/bin/qscanner"
 ```
 
-### For VM Snapshot Scanning
+### Option 2: Automated Installation (Pre-Deployment)
+
+Add to `terraform/modules/scanner/cloud-init.yaml` before deploying:
+
+```yaml
+runcmd:
+  - wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz -O /tmp/qscanner.gz
+  - gunzip /tmp/qscanner.gz
+  - chmod +x /tmp/qscanner
+  - mkdir -p /opt/bin
+  - mv /tmp/qscanner /opt/bin/qscanner
+  - /opt/bin/qscanner --version
+```
+
+### Option 3: Custom Scanner Image
+
+Create a scanner image with qscanner pre-installed:
 
 ```bash
-qscanner \
-  --pod [POD] \
-  --access-token [ACCESS_TOKEN] \
+# Create base instance
+gcloud compute instances create qscanner-base \
+  --image-family=cos-stable --image-project=cos-cloud \
+  --zone=us-central1-a
+
+# Install qscanner
+gcloud compute scp qscanner qscanner-base:/tmp/
+gcloud compute ssh qscanner-base --command="\
+  sudo mkdir -p /opt/bin && \
+  sudo mv /tmp/qscanner /opt/bin/qscanner && \
+  sudo chmod +x /opt/bin/qscanner"
+
+# Create image
+gcloud compute images create qualys-scanner-image \
+  --source-disk=qscanner-base \
+  --source-disk-zone=us-central1-a
+
+# Update terraform/modules/scanner/main.tf to use custom image
+# disk {
+#   source_image = "projects/YOUR_PROJECT/global/images/qualys-scanner-image"
+# }
+```
+
+## Invocation
+
+QScanner is automatically invoked by scanner scripts when a scan is triggered:
+
+```bash
+/opt/bin/qscanner \
+  --pod qg2 \
+  --access-token $TOKEN \
   --output-dir /var/lib/qscanner/output \
   --cache-dir /var/lib/qscanner/cache \
   --scan-types vuln,pkg,secret \
   vmsnapshot /mnt/snapshot
 ```
 
-**Key Parameters:**
+**Parameters:**
+- `--pod`: Qualys POD (qg2, qg3, qg4, etc.)
+- `--access-token`: Subscription token from Secret Manager
+- `--output-dir`: Where to write scan results
+- `--cache-dir`: Cache directory for performance
+- `--scan-types`: Types of scans (vuln,pkg,secret)
+- `vmsnapshot`: Target type for VM snapshot scanning
+- `/mnt/snapshot`: Path to mounted snapshot
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `--pod` | Qualys POD identifier | `qg2`, `qg3`, `qg4` |
-| `--access-token` | Qualys subscription token | From Secret Manager |
-| `--output-dir` | Where to write results | `/var/lib/qscanner/output` |
-| `--cache-dir` | Cache directory | `/var/lib/qscanner/cache` |
-| `--scan-types` | Types of scans to run | `vuln,pkg,secret` |
-| Target | What to scan | `vmsnapshot /mnt/snapshot` |
+**Scan Types:**
+- `vuln`: Vulnerability scanning
+- `pkg`: Package/dependency analysis
+- `secret`: Secret detection
 
-### Scan Types
+## Verification
 
-- **`vuln`** - Vulnerability scanning
-- **`pkg`** - Package/dependency scanning
-- **`secret`** - Secret detection
-- **`swca`** - Software composition analysis (may be alias for `pkg`)
+Check qscanner is installed correctly:
 
-### Target Types
+```bash
+gcloud compute ssh SCANNER_INSTANCE --zone=ZONE \
+  --command="/opt/bin/qscanner --version"
+```
 
-Qualys documentation should confirm which target type is correct for VM snapshots:
+Test scan on mounted filesystem:
 
-- **`vmsnapshot [path]`** - VM snapshot scanning (likely)
-- **`directory [path]`** - Directory scanning (fallback)
-- **`filesystem [path]`** - Filesystem scanning (alternative)
+```bash
+# SSH to scanner instance
+gcloud compute ssh SCANNER_INSTANCE --zone=ZONE
+
+# Create test directory
+sudo mkdir -p /tmp/test-scan
+echo "test" | sudo tee /tmp/test-scan/test.txt
+
+# Run qscanner (requires Qualys credentials)
+sudo /opt/bin/qscanner \
+  --pod qg2 \
+  --access-token $TOKEN \
+  --output-dir /tmp/output \
+  --scan-types vuln,pkg,secret \
+  vmsnapshot /tmp/test-scan
+
+# Check output
+ls -la /tmp/output/
+```
 
 ## Output Format
 
-### Result Files
+QScanner generates JSON files:
 
-QScanner generates JSON files with pattern: `*-ScanResult.json`
+```
+/var/lib/qscanner/output/
+└── *-ScanResult.json
+```
 
-**Example Structure** (based on Lambda implementation):
+**Example structure:**
 ```json
 {
   "vulnerabilities": {
-    "count": 42,
+    "total": 42,
     "critical": 5,
     "high": 15,
     "medium": 20,
     "low": 2
   },
-  "secrets": {
-    "count": 3,
-    "types": ["api_key", "private_key", "password"]
-  },
   "packages": {
-    "count": 156,
+    "total": 156,
     "vulnerable": 42
   },
-  "metadata": {
-    "scan_time": "2025-11-24T12:00:00Z",
-    "scanner_version": "4.5.0",
-    "target": "/mnt/snapshot"
+  "secrets": {
+    "total": 3
   }
 }
 ```
 
-## Integration with GCP Implementation
-
-### 1. Add QScanner Binary to Scanner Instances
-
-**Option A: Startup Script**
-```yaml
-# In terraform/modules/scanner/cloud-init.yaml
-runcmd:
-  - curl -L https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz -o /tmp/qscanner.gz
-  - gunzip /tmp/qscanner.gz
-  - chmod +x /tmp/qscanner
-  - mkdir -p /opt/bin
-  - mv /tmp/qscanner /opt/bin/qscanner
-```
-
-**Option B: Custom Image**
-```bash
-# Build scanner image with qscanner pre-installed
-gcloud compute images create qualys-scanner-v1 \
-  --source-disk=source-disk \
-  --source-disk-zone=us-central1-a
-```
-
-**Option C: Container Image**
-```dockerfile
-# Dockerfile for scanner container
-FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine
-
-RUN apk add --no-cache bash jq curl
-
-# Download and install qscanner
-RUN wget https://github.com/nelssec/qualys-lambda/raw/main/scanner-lambda/qscanner.gz && \
-    gunzip qscanner.gz && \
-    chmod +x qscanner && \
-    mv qscanner /opt/bin/qscanner
-
-COPY scanner/scripts/*.sh /usr/local/bin/
-
-ENTRYPOINT ["/usr/local/bin/scan-snapshot.sh"]
-```
-
-### 2. Update Scanner Scripts
-
-The `scanner/scripts/run-qscanner.sh` now has the correct invocation pattern.
-
-### 3. Configure Credentials
-
-Ensure Secret Manager contains:
-```json
-{
-  "pod": "qg2",
-  "subscription_token": "your-token-here",
-  "username": "optional-username",
-  "password": "optional-password",
-  "api_url": "https://qualysapi.qg2.apps.qualys.com"
-}
-```
-
-## Testing QScanner Locally
-
-### 1. Download Test Filesystem
-
-```bash
-# Create a test directory structure
-mkdir -p /tmp/test-scan/{bin,etc,var/log}
-echo "test" > /tmp/test-scan/etc/test.conf
-
-# Add a package manifest
-cat > /tmp/test-scan/var/lib/dpkg/status << EOF
-Package: nginx
-Version: 1.18.0-1
-Status: install ok installed
-EOF
-```
-
-### 2. Run QScanner
-
-```bash
-export POD="qg2"
-export ACCESS_TOKEN="your-token"
-
-/opt/bin/qscanner \
-  --pod "$POD" \
-  --access-token "$ACCESS_TOKEN" \
-  --output-dir /tmp/qscanner-output \
-  --cache-dir /tmp/qscanner-cache \
-  --scan-types vuln,pkg,secret \
-  directory /tmp/test-scan
-```
-
-### 3. Check Results
-
-```bash
-# List output files
-ls -lh /tmp/qscanner-output/
-
-# View results
-cat /tmp/qscanner-output/*-ScanResult.json | jq .
-```
-
 ## Troubleshooting
 
-### QScanner Not Found
-
+**QScanner not found:**
 ```bash
 # Verify installation
-ls -l /opt/bin/qscanner
-file /opt/bin/qscanner
+gcloud compute ssh SCANNER_INSTANCE --command="ls -l /opt/bin/qscanner"
 
-# Check if executable
-/opt/bin/qscanner --version
+# Check permissions
+gcloud compute ssh SCANNER_INSTANCE --command="sudo chmod +x /opt/bin/qscanner"
 ```
 
-### Authentication Errors
-
+**Authentication errors:**
 ```bash
 # Verify credentials
 gcloud secrets versions access latest --secret=qualys-credentials | jq .
 
-# Test POD connectivity
-curl -v https://qualysapi.qg2.apps.qualys.com
+# Test API connectivity
+gcloud compute ssh SCANNER_INSTANCE \
+  --command="curl -v https://qualysapi.qg2.apps.qualys.com"
 ```
 
-### No Results Generated
-
+**Scan failures:**
 ```bash
-# Check output directory permissions
-ls -ld /var/lib/qscanner/output
+# Check scanner logs
+gcloud compute ssh SCANNER_INSTANCE \
+  --command="sudo journalctl -u google-startup-scripts -n 100"
 
-# Run with verbose logging
-/opt/bin/qscanner --log-level debug ...
-
-# Check qscanner logs
-journalctl -u qscanner
+# Verify disk mounted
+gcloud compute ssh SCANNER_INSTANCE \
+  --command="mount | grep /mnt"
 ```
 
-### Scan Target Type Error
+## Performance Tuning
 
-```bash
-# Try different target types
-qscanner ... vmsnapshot /mnt/scan    # Primary
-qscanner ... directory /mnt/scan     # Fallback
-qscanner ... filesystem /mnt/scan    # Alternative
-```
+**Cache Directory:**
+- QScanner uses cache for faster subsequent scans
+- Mount persistent disk at `/var/lib/qscanner/cache`
+- Reduces scan time by 30-50% for rescans
 
-## Next Steps
+**Scan Types:**
+- Use only required scan types
+- `vuln` is fastest, `pkg` adds overhead
+- `secret` scanning is resource-intensive
 
-1. **Verify Target Type**: Confirm with Qualys whether `vmsnapshot`, `directory`, or another type is correct
-2. **Test End-to-End**: Deploy infrastructure and run a complete scan
-3. **Validate Results**: Ensure scan results upload correctly to QFlow
-4. **Optimize Performance**: Tune scan types and caching for your workload
-
-## References
-
-- [nelssec/qualys-lambda](https://github.com/nelssec/qualys-lambda) - Reference implementation
-- [QScanner Documentation](https://docs.qualys.com/en/qscanner/latest/) - Official docs
-- [Qualys PODs](https://www.qualys.com/platform-identification/) - POD identifiers
-
----
-
-**Status**: QScanner invocation pattern confirmed from Lambda implementation
+**Timeouts:**
+- Default: 3600 seconds (1 hour)
+- Adjust in `terraform.tfvars`: `scan_timeout_seconds`
+- Large disks may require longer timeouts
